@@ -301,7 +301,6 @@ import {
 
     return `
       <div class="offer-card" data-id="${escapeAttr(offer.id)}">
-        <button class="offer-more-btn" data-id="${escapeAttr(offer.id)}" aria-label="更多選項">⋯</button>
         <div class="offer-card-top">
           <div class="offer-main-info">
             <div class="offer-card-title">${escapeHtml(offer.bank)} ${escapeHtml(offer.card)}</div>
@@ -314,7 +313,10 @@ import {
         ${tags.length ? `<div class="tag-row">${tags.map((t) => `<span class="tag">${t}</span>`).join("")}</div>` : ""}
         <div class="offer-card-bottom">
           <span class="offer-dates">${formatDateRange(offer.startDate, offer.endDate)}</span>
-          <span class="status-pill status-${status.key}">${status.icon} ${status.label}</span>
+          <div class="offer-card-actions">
+            <span class="status-pill status-${status.key}">${status.icon} ${status.label}</span>
+            <button class="offer-more-btn" data-id="${escapeAttr(offer.id)}" aria-label="編輯">編輯</button>
+          </div>
         </div>
       </div>`;
   }
