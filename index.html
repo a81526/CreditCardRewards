@@ -2,21 +2,147 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Credit Card Rewards</title>
-<style>
-*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111;background:#fff}header{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid #eee;position:sticky;top:0;background:#fff}.container{max-width:900px;margin:auto;padding:20px}button{border:0;border-radius:12px;padding:10px 14px;background:#111;color:#fff}input{width:100%;padding:14px;border:1px solid #eaeaea;border-radius:16px;font-size:16px}.item{background:#fafafa;border:1px solid #eaeaea;border-radius:16px;padding:16px;margin-top:12px}.rate{font-size:22px;font-weight:700}.small{color:#666;font-size:14px}
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>今天刷哪張卡</title>
+<meta name="theme-color" content="#ffffff">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header><b>Credit Card Rewards</b><button onclick="addReward()">＋新增活動</button></header>
-<div class="container"><input id="search" placeholder="搜尋銀行、卡片、分類、備註" oninput="render()"><div id="app"></div></div>
-<script>
-let rewards=JSON.parse(localStorage.getItem('rewards')||'[]');
-function save(){localStorage.setItem('rewards',JSON.stringify(rewards))}
-function addReward(){let card=prompt('信用卡名稱');if(!card)return;let category=prompt('分類');let cashback=Number(prompt('回饋%'));let note=prompt('備註');rewards.push({id:Date.now(),cardName:card,category,cashback,note});save();render()}
-function render(){let k=document.getElementById('search').value.toLowerCase();let d=rewards.filter(r=>JSON.stringify(r).toLowerCase().includes(k));document.getElementById('app').innerHTML=d.map(r=>`<div class="item"><b>${r.cardName}</b><div class="small">${r.category}<br>${r.note||''}</div><div class="rate">${r.cashback}%</div></div>`).join('')||'<p class="small">目前沒有優惠資料</p>'}
-render();
-</script>
+
+<header class="topbar">
+  <div class="topbar-row">
+    <h1 class="app-title">今天刷哪張卡</h1>
+    <div class="topbar-actions">
+      <button id="menuBtn" class="icon-btn" aria-label="更多" aria-haspopup="menu">⋯</button>
+      <div id="menuPanel" class="menu-panel hidden" role="menu">
+        <button id="exportBtn" class="menu-item" role="menuitem">匯出 JSON</button>
+        <button id="importBtn" class="menu-item" role="menuitem">匯入 JSON</button>
+        <input type="file" id="importFile" accept="application/json" hidden>
+      </div>
+    </div>
+  </div>
+
+  <div class="search-row">
+    <span class="search-icon">⌕</span>
+    <input id="searchInput" type="text" placeholder="搜尋銀行、卡片、分類、備註" autocomplete="off" inputmode="search">
+    <button id="clearSearchBtn" class="clear-btn hidden" aria-label="清除搜尋">✕</button>
+  </div>
+
+  <div class="view-toggle" role="tablist">
+    <button class="toggle-btn active" data-view="category" role="tab" aria-selected="true">依分類</button>
+    <button class="toggle-btn" data-view="card" role="tab" aria-selected="false">依信用卡</button>
+  </div>
+</header>
+
+<main id="main">
+  <section id="expiringSection" class="expiring-section hidden">
+    <div class="expiring-header">
+      <span class="expiring-title">⏳ 快到期</span>
+      <span id="expiringCount" class="expiring-count"></span>
+    </div>
+    <div id="expiringList" class="expiring-list"></div>
+  </section>
+
+  <div id="listContainer"></div>
+
+  <div id="emptyState" class="empty-state hidden">
+    <p class="empty-title">還沒有任何優惠</p>
+    <p class="empty-sub">點右下角「+」新增第一筆</p>
+  </div>
+
+  <div id="noResultState" class="empty-state hidden">
+    <p class="empty-title">找不到符合的結果</p>
+    <p class="empty-sub">換個關鍵字試試</p>
+  </div>
+</main>
+
+<button id="addBtn" class="fab" aria-label="新增優惠">+</button>
+
+<dialog id="offerDialog">
+  <form id="offerForm" method="dialog">
+    <div class="dialog-header">
+      <h2 id="dialogTitle">新增優惠</h2>
+      <button type="button" id="closeDialogBtn" class="icon-btn" aria-label="關閉">✕</button>
+    </div>
+
+    <div class="dialog-body">
+      <input type="hidden" id="offerId">
+
+      <label class="field">
+        <span class="field-label">銀行</span>
+        <input type="text" id="fieldBank" required placeholder="例：國泰世華">
+      </label>
+
+      <label class="field">
+        <span class="field-label">信用卡</span>
+        <input type="text" id="fieldCard" required placeholder="例：CUBE 卡">
+      </label>
+
+      <label class="field">
+        <span class="field-label">分類</span>
+        <input type="text" id="fieldCategory" required placeholder="例：網購 / 加油 / 餐飲">
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span class="field-label">回饋 %</span>
+          <input type="number" id="fieldPercent" step="0.1" min="0" placeholder="例：5">
+        </label>
+        <label class="field">
+          <span class="field-label">最高回饋</span>
+          <input type="number" id="fieldMaxCashback" step="1" min="0" placeholder="例：500">
+        </label>
+      </div>
+
+      <label class="field">
+        <span class="field-label">每月上限</span>
+        <input type="text" id="fieldMonthlyCap" placeholder="例：NT$2,000 消費額度">
+      </label>
+
+      <label class="field">
+        <span class="field-label">備註</span>
+        <textarea id="fieldNote" rows="2" placeholder="選填"></textarea>
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span class="field-label">開始日期</span>
+          <input type="date" id="fieldStartDate" required>
+        </label>
+        <label class="field">
+          <span class="field-label">結束日期</span>
+          <input type="date" id="fieldEndDate" required>
+        </label>
+      </div>
+
+      <label class="checkbox-field">
+        <input type="checkbox" id="fieldNeedsRegistration">
+        <span>需要登錄</span>
+      </label>
+
+      <label class="checkbox-field">
+        <input type="checkbox" id="fieldNeedsSwitch">
+        <span>需要切換權益</span>
+      </label>
+    </div>
+
+    <div class="dialog-footer">
+      <button type="button" id="cancelBtn" class="btn btn-secondary">取消</button>
+      <button type="submit" id="saveBtn" class="btn btn-primary">儲存</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="actionSheetOverlay" class="action-sheet-overlay hidden">
+  <div id="actionSheet" class="action-sheet">
+    <button id="editActionBtn" class="action-sheet-item">編輯</button>
+    <button id="deleteActionBtn" class="action-sheet-item danger">刪除</button>
+    <button id="cancelActionBtn" class="action-sheet-item cancel">取消</button>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
 </body>
 </html>
