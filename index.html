@@ -15,6 +15,9 @@
     <div class="topbar-actions">
       <button id="menuBtn" class="icon-btn" aria-label="更多" aria-haspopup="menu">⋯</button>
       <div id="menuPanel" class="menu-panel hidden" role="menu">
+        <button id="syncMenuBtn" class="menu-item" role="menuitem">
+          <span id="syncMenuLabel">☁️ 雲端同步</span>
+        </button>
         <button id="exportBtn" class="menu-item" role="menuitem">匯出 JSON</button>
         <button id="importBtn" class="menu-item" role="menuitem">匯入 JSON</button>
         <input type="file" id="importFile" accept="application/json" hidden>
@@ -133,6 +136,54 @@
   </form>
 </dialog>
 
+<dialog id="syncDialog">
+  <div class="dialog-header">
+    <h2>☁️ 雲端同步</h2>
+    <button type="button" id="closeSyncDialogBtn" class="icon-btn" aria-label="關閉">✕</button>
+  </div>
+
+  <div class="dialog-body">
+    <div id="syncStatusBox" class="sync-status-box">
+      <p id="syncStatusText" class="sync-status-text">尚未設定同步</p>
+    </div>
+
+    <div id="syncNotConnected">
+      <p class="sync-desc">要讓手機、電腦看到同一份資料，兩台裝置要用同一組「同步碼」。</p>
+
+      <button type="button" id="generateSyncBtn" class="btn btn-primary" style="width:100%;">
+        這是第一台裝置：產生新的同步碼
+      </button>
+
+      <p class="sync-desc" style="margin-top:16px;">已經有同步碼了？</p>
+      <label class="field">
+        <span class="field-label">貼上同步碼</span>
+        <input type="text" id="syncKeyInput" placeholder="貼上其他裝置的同步碼" autocomplete="off">
+      </label>
+      <button type="button" id="connectSyncBtn" class="btn btn-secondary" style="width:100%; margin-top:8px;">
+        連接這組同步碼
+      </button>
+    </div>
+
+    <div id="syncConnected" class="hidden">
+      <p class="sync-desc">把這組同步碼貼到你其他裝置的「輸入同步碼」欄位，兩邊就會自動同步。</p>
+      <label class="field">
+        <span class="field-label">你的同步碼（請妥善保存，知道這組碼的人都能看到/修改資料）</span>
+        <input type="text" id="syncKeyDisplay" readonly>
+      </label>
+      <button type="button" id="copySyncBtn" class="btn btn-secondary" style="width:100%;">
+        複製同步碼
+      </button>
+      <button type="button" id="disconnectSyncBtn" class="btn btn-secondary" style="width:100%; margin-top:8px; color:var(--red);">
+        停止同步（僅保留本機資料）
+      </button>
+    </div>
+  </div>
+
+  <div class="dialog-footer">
+    <button type="button" id="closeSyncDialogBtn2" class="btn btn-primary">完成</button>
+  </div>
+</dialog>
+
 <div id="actionSheetOverlay" class="action-sheet-overlay hidden">
   <div id="actionSheet" class="action-sheet">
     <button id="editActionBtn" class="action-sheet-item">編輯</button>
@@ -143,6 +194,6 @@
 
 <div id="toast" class="toast hidden"></div>
 
-<script src="app.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>

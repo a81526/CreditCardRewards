@@ -555,6 +555,30 @@ dialog::backdrop {
 .btn-secondary { background: var(--card-bg); color: var(--text-primary); }
 .btn-secondary:active { background: var(--card-bg-hover); }
 
+/* ---------- Sync dialog ---------- */
+
+.sync-status-box {
+  background: var(--card-bg);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.sync-status-text {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sync-status-text.is-synced { color: var(--green); }
+
+.sync-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 12px 0 10px;
+}
+
 /* ---------- Action sheet ---------- */
 
 .action-sheet-overlay {

@@ -1,9 +1,26 @@
+import { firebaseConfig } from "./firebase-config.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import {
+  getFirestore,
+  doc,
+  setDoc,
+  onSnapshot,
+  serverTimestamp,
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
 (() => {
   "use strict";
 
   const STORAGE_KEY = "cardOffers_v1";
   const VIEW_KEY = "cardOffers_view";
+  const SYNC_KEY_STORAGE = "cardOffers_syncKey";
   const EXPIRING_THRESHOLD_DAYS = 7;
+
+  /* ---------- Firebase ---------- */
+
+  const firebaseApp = initializeApp(firebaseConfig);
+  const db = getFirestore(firebaseApp);
+  let unsubscribeSnapshot = null;
 
   /* ---------- State ---------- */
 
@@ -11,6 +28,7 @@
   let currentView = localStorage.getItem(VIEW_KEY) || "category";
   let searchTerm = "";
   let actionTargetId = null;
+  let syncKey = localStorage.getItem(SYNC_KEY_STORAGE) || "";
 
   /* ---------- DOM refs ---------- */
 
@@ -31,6 +49,21 @@
   const exportBtn = $("exportBtn");
   const importBtn = $("importBtn");
   const importFile = $("importFile");
+
+  const syncMenuBtn = $("syncMenuBtn");
+  const syncMenuLabel = $("syncMenuLabel");
+  const syncDialog = $("syncDialog");
+  const closeSyncDialogBtn = $("closeSyncDialogBtn");
+  const closeSyncDialogBtn2 = $("closeSyncDialogBtn2");
+  const syncStatusText = $("syncStatusText");
+  const syncNotConnected = $("syncNotConnected");
+  const syncConnected = $("syncConnected");
+  const generateSyncBtn = $("generateSyncBtn");
+  const syncKeyInput = $("syncKeyInput");
+  const connectSyncBtn = $("connectSyncBtn");
+  const syncKeyDisplay = $("syncKeyDisplay");
+  const copySyncBtn = $("copySyncBtn");
+  const disconnectSyncBtn = $("disconnectSyncBtn");
 
   const addBtn = $("addBtn");
   const offerDialog = $("offerDialog");
@@ -77,6 +110,12 @@
 
   function saveOffers() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(offers));
+  }
+
+  // 每次資料異動都呼叫這個：存本機 + (若已同步) 推上雲端
+  function persist() {
+    saveOffers();
+    if (syncKey) pushToCloud();
   }
 
   function makeId() {
@@ -387,7 +426,7 @@
         const ok = window.confirm(`匯入將覆蓋目前所有資料（共 ${offers.length} 筆），確定要繼續嗎？`);
         if (!ok) return;
         offers = parsed.map((o) => ({ ...o, id: o.id || makeId() }));
-        saveOffers();
+        persist();
         render();
         showToast("匯入成功");
       } catch (e) {
@@ -396,6 +435,138 @@
     };
     reader.readAsText(file);
   });
+
+  /* ---------- Cloud sync ---------- */
+
+  function generateRandomKey() {
+    const bytes = new Uint8Array(18);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 24);
+  }
+
+  function updateSyncUI() {
+    if (syncKey) {
+      syncMenuLabel.textContent = "☁️ 雲端同步（已連接）";
+      syncStatusText.textContent = "✅ 這台裝置已連接雲端同步";
+      syncStatusText.classList.add("is-synced");
+      syncNotConnected.classList.add("hidden");
+      syncConnected.classList.remove("hidden");
+      syncKeyDisplay.value = syncKey;
+    } else {
+      syncMenuLabel.textContent = "☁️ 雲端同步";
+      syncStatusText.textContent = "尚未設定同步，資料只存在這台裝置";
+      syncStatusText.classList.remove("is-synced");
+      syncNotConnected.classList.remove("hidden");
+      syncConnected.classList.add("hidden");
+    }
+  }
+
+  function pushToCloud() {
+    if (!syncKey) return;
+    const ref = doc(db, "syncs", syncKey);
+    setDoc(ref, { offers, updatedAt: serverTimestamp() }).catch((err) => {
+      console.error("同步上傳失敗", err);
+      showToast("雲端同步失敗，請檢查網路");
+    });
+  }
+
+  function subscribeCloud(key) {
+    if (unsubscribeSnapshot) {
+      unsubscribeSnapshot();
+      unsubscribeSnapshot = null;
+    }
+    const ref = doc(db, "syncs", key);
+    unsubscribeSnapshot = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        if (!Array.isArray(data.offers)) return;
+        offers = data.offers;
+        saveOffers();
+        render();
+      },
+      (err) => {
+        console.error("雲端同步監聽失敗", err);
+        showToast("雲端連線中斷，暫時使用本機資料");
+      }
+    );
+  }
+
+  function startSyncAsNewDevice() {
+    const key = generateRandomKey();
+    syncKey = key;
+    localStorage.setItem(SYNC_KEY_STORAGE, key);
+    pushToCloud();
+    subscribeCloud(key);
+    updateSyncUI();
+    showToast("已產生同步碼並開始同步");
+  }
+
+  function connectToExistingKey(key) {
+    const trimmed = key.trim();
+    if (!trimmed) {
+      window.alert("請輸入同步碼");
+      return;
+    }
+    if (offers.length > 0) {
+      const ok = window.confirm("連接後，這台裝置目前的本機資料會被雲端上的資料覆蓋，確定要繼續嗎？");
+      if (!ok) return;
+    }
+    syncKey = trimmed;
+    localStorage.setItem(SYNC_KEY_STORAGE, syncKey);
+    subscribeCloud(syncKey);
+    updateSyncUI();
+    showToast("已連接同步碼");
+  }
+
+  function disconnectSync() {
+    const ok = window.confirm("停止同步後，這台裝置會保留目前資料，但不會再跟其他裝置同步，確定嗎？");
+    if (!ok) return;
+    if (unsubscribeSnapshot) {
+      unsubscribeSnapshot();
+      unsubscribeSnapshot = null;
+    }
+    syncKey = "";
+    localStorage.removeItem(SYNC_KEY_STORAGE);
+    updateSyncUI();
+    showToast("已停止同步");
+  }
+
+  syncMenuBtn.addEventListener("click", () => {
+    menuPanel.classList.add("hidden");
+    updateSyncUI();
+    syncDialog.showModal();
+  });
+
+  closeSyncDialogBtn.addEventListener("click", () => syncDialog.close());
+  closeSyncDialogBtn2.addEventListener("click", () => syncDialog.close());
+
+  syncDialog.addEventListener("click", (e) => {
+    const rect = syncDialog.getBoundingClientRect();
+    const inside =
+      e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+    if (!inside) syncDialog.close();
+  });
+
+  generateSyncBtn.addEventListener("click", startSyncAsNewDevice);
+
+  connectSyncBtn.addEventListener("click", () => {
+    connectToExistingKey(syncKeyInput.value);
+    syncKeyInput.value = "";
+  });
+
+  copySyncBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(syncKey);
+      showToast("已複製同步碼");
+    } catch (e) {
+      syncKeyDisplay.select();
+      showToast("請手動複製選取的文字");
+    }
+  });
+
+  disconnectSyncBtn.addEventListener("click", disconnectSync);
 
   /* ---------- Dialog: add / edit ---------- */
 
@@ -490,7 +661,7 @@
       showToast("已新增優惠");
     }
 
-    saveOffers();
+    persist();
     offerDialog.close();
     render();
   });
@@ -528,7 +699,7 @@
     const ok = window.confirm(`確定要刪除「${offer.bank} ${offer.card}」的這筆優惠嗎？`);
     if (!ok) return;
     offers = offers.filter((o) => o.id !== id);
-    saveOffers();
+    persist();
     render();
     showToast("已刪除");
   });
@@ -555,5 +726,7 @@
     }
   });
 
+  updateSyncUI();
+  if (syncKey) subscribeCloud(syncKey);
   render();
 })();
