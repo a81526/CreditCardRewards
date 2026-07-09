@@ -89,10 +89,16 @@
         <input type="text" id="fieldCategory" required placeholder="例：網購 / 加油 / 餐飲">
       </label>
 
+      <div class="field">
+        <span class="field-label">回饋（可新增多筆，例如國內／海外）</span>
+        <div id="tiersContainer" class="tiers-container"></div>
+        <button type="button" id="addTierBtn" class="add-tier-btn">＋ 新增回饋項目</button>
+      </div>
+
       <div class="field-row">
         <label class="field">
-          <span class="field-label">回饋 %</span>
-          <input type="number" id="fieldPercent" step="0.1" min="0" placeholder="例：5">
+          <span class="field-label">超過上限後回饋 %</span>
+          <input type="number" id="fieldFallbackPercent" step="0.1" min="0" placeholder="例：1">
         </label>
         <label class="field">
           <span class="field-label">最高回饋</span>

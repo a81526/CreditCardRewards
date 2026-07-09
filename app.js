@@ -84,7 +84,7 @@ import {
     bank: $("fieldBank"),
     card: $("fieldCard"),
     category: $("fieldCategory"),
-    percent: $("fieldPercent"),
+    fallbackPercent: $("fieldFallbackPercent"),
     maxCashback: $("fieldMaxCashback"),
     monthlyCap: $("fieldMonthlyCap"),
     note: $("fieldNote"),
@@ -94,6 +94,9 @@ import {
     needsSwitch: $("fieldNeedsSwitch"),
   };
 
+  const tiersContainer = $("tiersContainer");
+  const addTierBtn = $("addTierBtn");
+
   /* ---------- Storage ---------- */
 
   function loadOffers() {
@@ -101,11 +104,22 @@ import {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      return Array.isArray(parsed) ? parsed.map(migrateOffer) : [];
     } catch (e) {
       console.error("讀取資料失敗", e);
       return [];
     }
+  }
+
+  // 舊資料只有單一 percent 欄位，自動轉成 tiers 陣列，讓舊資料不會消失
+  function migrateOffer(offer) {
+    if (Array.isArray(offer.tiers)) return offer;
+    const tiers = [];
+    if (offer.percent !== "" && offer.percent != null) {
+      tiers.push({ id: makeId(), label: "", percent: offer.percent });
+    }
+    const { percent, ...rest } = offer;
+    return { ...rest, tiers };
   }
 
   function saveOffers() {
@@ -171,7 +185,8 @@ import {
 
   function matchesSearch(offer, term) {
     if (!term) return true;
-    const haystack = [offer.bank, offer.card, offer.category, offer.note]
+    const tierLabels = Array.isArray(offer.tiers) ? offer.tiers.map((t) => t.label).filter(Boolean) : [];
+    const haystack = [offer.bank, offer.card, offer.category, offer.note, ...tierLabels]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
@@ -288,7 +303,7 @@ import {
 
   function renderCard(offer) {
     const status = getStatus(offer);
-    const percentText = offer.percent !== "" && offer.percent != null ? `${trimNum(offer.percent)}%` : "–";
+    const tiers = Array.isArray(offer.tiers) ? offer.tiers : [];
     const tags = [];
     if (offer.needsRegistration) tags.push("需登錄");
     if (offer.needsSwitch) tags.push("需切換權益");
@@ -298,6 +313,28 @@ import {
     if (offer.maxCashback !== "" && offer.maxCashback != null) {
       metaParts.push(`<span class="meta-item">最高回饋 ${trimNum(offer.maxCashback)}</span>`);
     }
+    if (offer.fallbackPercent !== "" && offer.fallbackPercent != null) {
+      metaParts.push(
+        `<span class="meta-item fallback-note">超過上限後 ${trimNum(offer.fallbackPercent)}%</span>`
+      );
+    }
+
+    let percentBlock;
+    if (tiers.length === 0) {
+      percentBlock = `<div class="offer-card-percent num">–</div>`;
+    } else if (tiers.length === 1 && !tiers[0].label) {
+      percentBlock = `<div class="offer-card-percent num">${trimNum(tiers[0].percent)}%</div>`;
+    } else {
+      percentBlock = `<div class="tier-list">${tiers
+        .map(
+          (t) => `
+          <div class="tier-row">
+            ${t.label ? `<span class="tier-row-label">${escapeHtml(t.label)}</span>` : ""}
+            <span class="tier-row-percent num">${trimNum(t.percent)}%</span>
+          </div>`
+        )
+        .join("")}</div>`;
+    }
 
     return `
       <div class="offer-card" data-id="${escapeAttr(offer.id)}">
@@ -306,7 +343,7 @@ import {
             <div class="offer-card-title">${escapeHtml(offer.bank)} ${escapeHtml(offer.card)}</div>
             <div class="offer-card-sub">${escapeHtml(offer.category)}</div>
           </div>
-          <div class="offer-card-percent num">${percentText}</div>
+          ${percentBlock}
         </div>
         ${metaParts.length ? `<div class="offer-card-meta">${metaParts.join("")}</div>` : ""}
         ${offer.note ? `<div class="offer-card-note">${escapeHtml(offer.note)}</div>` : ""}
@@ -427,7 +464,7 @@ import {
         if (!valid) throw new Error("格式錯誤");
         const ok = window.confirm(`匯入將覆蓋目前所有資料（共 ${offers.length} 筆），確定要繼續嗎？`);
         if (!ok) return;
-        offers = parsed.map((o) => ({ ...o, id: o.id || makeId() }));
+        offers = parsed.map((o) => migrateOffer({ ...o, id: o.id || makeId() }));
         persist();
         render();
         showToast("匯入成功");
@@ -484,7 +521,7 @@ import {
         if (!snap.exists()) return;
         const data = snap.data();
         if (!Array.isArray(data.offers)) return;
-        offers = data.offers;
+        offers = data.offers.map(migrateOffer);
         saveOffers();
         render();
       },
@@ -570,6 +607,42 @@ import {
 
   disconnectSyncBtn.addEventListener("click", disconnectSync);
 
+  /* ---------- Tier rows (回饋項目) ---------- */
+
+  function makeTierRow(tier) {
+    const row = document.createElement("div");
+    row.className = "tier-input-row";
+    row.innerHTML = `
+      <input type="text" class="tier-label-input" placeholder="標籤（選填，例：國內）" value="${escapeAttr(tier.label || "")}">
+      <input type="number" class="tier-percent-input" step="0.1" min="0" placeholder="%" value="${tier.percent ?? ""}">
+      <button type="button" class="tier-remove-btn" aria-label="刪除這筆回饋">✕</button>
+    `;
+    row.querySelector(".tier-remove-btn").addEventListener("click", () => row.remove());
+    return row;
+  }
+
+  function addTierRow(tier = { label: "", percent: "" }) {
+    tiersContainer.appendChild(makeTierRow(tier));
+  }
+
+  function clearTierRows() {
+    tiersContainer.innerHTML = "";
+  }
+
+  function collectTiers() {
+    const rows = tiersContainer.querySelectorAll(".tier-input-row");
+    const tiers = [];
+    rows.forEach((row) => {
+      const label = row.querySelector(".tier-label-input").value.trim();
+      const percentRaw = row.querySelector(".tier-percent-input").value;
+      if (percentRaw === "") return;
+      tiers.push({ id: makeId(), label, percent: Number(percentRaw) });
+    });
+    return tiers;
+  }
+
+  addTierBtn.addEventListener("click", () => addTierRow());
+
   /* ---------- Dialog: add / edit ---------- */
 
   function resetForm() {
@@ -577,7 +650,7 @@ import {
     fields.bank.value = "";
     fields.card.value = "";
     fields.category.value = "";
-    fields.percent.value = "";
+    fields.fallbackPercent.value = "";
     fields.maxCashback.value = "";
     fields.monthlyCap.value = "";
     fields.note.value = "";
@@ -585,6 +658,8 @@ import {
     fields.endDate.value = "";
     fields.needsRegistration.checked = false;
     fields.needsSwitch.checked = false;
+    clearTierRows();
+    addTierRow();
   }
 
   function openAddDialog() {
@@ -601,7 +676,7 @@ import {
     fields.bank.value = offer.bank || "";
     fields.card.value = offer.card || "";
     fields.category.value = offer.category || "";
-    fields.percent.value = offer.percent ?? "";
+    fields.fallbackPercent.value = offer.fallbackPercent ?? "";
     fields.maxCashback.value = offer.maxCashback ?? "";
     fields.monthlyCap.value = offer.monthlyCap || "";
     fields.note.value = offer.note || "";
@@ -609,6 +684,9 @@ import {
     fields.endDate.value = offer.endDate || "";
     fields.needsRegistration.checked = !!offer.needsRegistration;
     fields.needsSwitch.checked = !!offer.needsSwitch;
+    clearTierRows();
+    const tiers = Array.isArray(offer.tiers) && offer.tiers.length ? offer.tiers : [{ label: "", percent: "" }];
+    tiers.forEach((t) => addTierRow(t));
     dialogTitle.textContent = "編輯優惠";
     offerDialog.showModal();
   }
@@ -644,7 +722,8 @@ import {
       bank: fields.bank.value.trim(),
       card: fields.card.value.trim(),
       category: fields.category.value.trim(),
-      percent: fields.percent.value === "" ? "" : Number(fields.percent.value),
+      tiers: collectTiers(),
+      fallbackPercent: fields.fallbackPercent.value === "" ? "" : Number(fields.fallbackPercent.value),
       maxCashback: fields.maxCashback.value === "" ? "" : Number(fields.maxCashback.value),
       monthlyCap: fields.monthlyCap.value.trim(),
       note: fields.note.value.trim(),
