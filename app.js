@@ -228,7 +228,7 @@ import {
         ({ offer, status }) => `
         <div class="expiring-item" data-id="${escapeAttr(offer.id)}">
           <span class="expiring-item-name">${escapeHtml(offer.bank)} ${escapeHtml(offer.card)} · ${escapeHtml(offer.category)}</span>
-          <span class="expiring-item-days">剩 ${status.daysLeft} 天</span>
+          <span class="expiring-item-days num">剩 ${status.daysLeft} 天</span>
         </div>`
       )
       .join("");
@@ -307,7 +307,7 @@ import {
             <div class="offer-card-title">${escapeHtml(offer.bank)} ${escapeHtml(offer.card)}</div>
             <div class="offer-card-sub">${escapeHtml(offer.category)}</div>
           </div>
-          <div class="offer-card-percent">${percentText}</div>
+          <div class="offer-card-percent num">${percentText}</div>
         </div>
         ${metaParts.length ? `<div class="offer-card-meta">${metaParts.join("")}</div>` : ""}
         ${offer.note ? `<div class="offer-card-note">${escapeHtml(offer.note)}</div>` : ""}
