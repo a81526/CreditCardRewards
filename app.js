@@ -84,9 +84,6 @@ import {
     bank: $("fieldBank"),
     card: $("fieldCard"),
     category: $("fieldCategory"),
-    fallbackPercent: $("fieldFallbackPercent"),
-    maxCashback: $("fieldMaxCashback"),
-    monthlyCap: $("fieldMonthlyCap"),
     note: $("fieldNote"),
     startDate: $("fieldStartDate"),
     endDate: $("fieldEndDate"),
@@ -111,14 +108,23 @@ import {
     }
   }
 
-  // 舊資料只有單一 percent 欄位，自動轉成 tiers 陣列，讓舊資料不會消失
+  // 資料格式升級（會依序套用，讓不同版本的舊資料都能自動轉成最新格式）：
+  // v1：只有單一 percent 欄位 → 轉成 tiers 陣列
+  // v2：tiers 存在，但上限/最高回饋/超額回饋還放在卡片層級 → 搬進每個 tier 裡
   function migrateOffer(offer) {
-    if (Array.isArray(offer.tiers)) return offer;
-    const tiers = [];
-    if (offer.percent !== "" && offer.percent != null) {
-      tiers.push({ id: makeId(), label: "", percent: offer.percent });
+    let tiers = Array.isArray(offer.tiers) ? offer.tiers : [];
+    if (tiers.length === 0 && offer.percent !== "" && offer.percent != null) {
+      tiers = [{ id: makeId(), label: "", percent: offer.percent }];
     }
-    const { percent, ...rest } = offer;
+    tiers = tiers.map((t) => ({
+      id: t.id || makeId(),
+      label: t.label || "",
+      percent: t.percent ?? "",
+      maxCashback: t.maxCashback ?? (offer.maxCashback ?? ""),
+      monthlyCap: t.monthlyCap ?? (offer.monthlyCap ?? ""),
+      fallbackPercent: t.fallbackPercent ?? (offer.fallbackPercent ?? ""),
+    }));
+    const { percent, maxCashback, monthlyCap, fallbackPercent, ...rest } = offer;
     return { ...rest, tiers };
   }
 
@@ -301,6 +307,24 @@ import {
     });
   }
 
+  function renderTierBlock(tier) {
+    const percentText = tier.percent !== "" && tier.percent != null ? `${trimNum(tier.percent)}%` : "–";
+    const metaBits = [];
+    if (tier.monthlyCap) metaBits.push(`上限 ${escapeHtml(tier.monthlyCap)}`);
+    if (tier.maxCashback !== "" && tier.maxCashback != null) metaBits.push(`最高回饋 ${trimNum(tier.maxCashback)}`);
+    if (tier.fallbackPercent !== "" && tier.fallbackPercent != null) {
+      metaBits.push(`超過上限後 ${trimNum(tier.fallbackPercent)}%`);
+    }
+    return `
+      <div class="tier-block">
+        <div class="tier-block-head">
+          <span class="tier-block-label">${tier.label ? escapeHtml(tier.label) : ""}</span>
+          <span class="tier-block-percent num">${percentText}</span>
+        </div>
+        ${metaBits.length ? `<div class="tier-block-meta">${metaBits.join(" · ")}</div>` : ""}
+      </div>`;
+  }
+
   function renderCard(offer) {
     const status = getStatus(offer);
     const tiers = Array.isArray(offer.tiers) ? offer.tiers : [];
@@ -308,33 +332,9 @@ import {
     if (offer.needsRegistration) tags.push("需登錄");
     if (offer.needsSwitch) tags.push("需切換權益");
 
-    const metaParts = [];
-    if (offer.monthlyCap) metaParts.push(`<span class="meta-item">上限 ${escapeHtml(offer.monthlyCap)}</span>`);
-    if (offer.maxCashback !== "" && offer.maxCashback != null) {
-      metaParts.push(`<span class="meta-item">最高回饋 ${trimNum(offer.maxCashback)}</span>`);
-    }
-    if (offer.fallbackPercent !== "" && offer.fallbackPercent != null) {
-      metaParts.push(
-        `<span class="meta-item fallback-note">超過上限後 ${trimNum(offer.fallbackPercent)}%</span>`
-      );
-    }
-
-    let percentBlock;
-    if (tiers.length === 0) {
-      percentBlock = `<div class="offer-card-percent num">–</div>`;
-    } else if (tiers.length === 1 && !tiers[0].label) {
-      percentBlock = `<div class="offer-card-percent num">${trimNum(tiers[0].percent)}%</div>`;
-    } else {
-      percentBlock = `<div class="tier-list">${tiers
-        .map(
-          (t) => `
-          <div class="tier-row">
-            ${t.label ? `<span class="tier-row-label">${escapeHtml(t.label)}</span>` : ""}
-            <span class="tier-row-percent num">${trimNum(t.percent)}%</span>
-          </div>`
-        )
-        .join("")}</div>`;
-    }
+    const tierBlocks = tiers.length
+      ? `<div class="tier-blocks">${tiers.map(renderTierBlock).join("")}</div>`
+      : `<div class="tier-blocks">${renderTierBlock({})}</div>`;
 
     return `
       <div class="offer-card" data-id="${escapeAttr(offer.id)}">
@@ -343,9 +343,8 @@ import {
             <div class="offer-card-title">${escapeHtml(offer.bank)} ${escapeHtml(offer.card)}</div>
             <div class="offer-card-sub">${escapeHtml(offer.category)}</div>
           </div>
-          ${percentBlock}
         </div>
-        ${metaParts.length ? `<div class="offer-card-meta">${metaParts.join("")}</div>` : ""}
+        ${tierBlocks}
         ${offer.note ? `<div class="offer-card-note">${escapeHtml(offer.note)}</div>` : ""}
         ${tags.length ? `<div class="tag-row">${tags.map((t) => `<span class="tag">${t}</span>`).join("")}</div>` : ""}
         <div class="offer-card-bottom">
@@ -613,15 +612,22 @@ import {
     const row = document.createElement("div");
     row.className = "tier-input-row";
     row.innerHTML = `
-      <input type="text" class="tier-label-input" placeholder="標籤（選填，例：國內）" value="${escapeAttr(tier.label || "")}">
-      <input type="number" class="tier-percent-input" step="0.1" min="0" placeholder="%" value="${tier.percent ?? ""}">
-      <button type="button" class="tier-remove-btn" aria-label="刪除這筆回饋">✕</button>
+      <div class="tier-input-top">
+        <input type="text" class="tier-label-input" placeholder="名稱（例：國內）" value="${escapeAttr(tier.label || "")}">
+        <input type="number" class="tier-percent-input" step="0.1" min="0" placeholder="回饋 %" value="${tier.percent ?? ""}">
+        <button type="button" class="tier-remove-btn" aria-label="刪除這筆回饋">✕</button>
+      </div>
+      <div class="tier-input-grid">
+        <input type="number" class="tier-maxcashback-input" step="1" min="0" placeholder="最高回饋" value="${tier.maxCashback ?? ""}">
+        <input type="text" class="tier-monthlycap-input" placeholder="每月上限" value="${escapeAttr(tier.monthlyCap || "")}">
+        <input type="number" step="0.1" min="0" class="tier-fallback-input" placeholder="超過上限後回饋 %" value="${tier.fallbackPercent ?? ""}">
+      </div>
     `;
     row.querySelector(".tier-remove-btn").addEventListener("click", () => row.remove());
     return row;
   }
 
-  function addTierRow(tier = { label: "", percent: "" }) {
+  function addTierRow(tier = { label: "", percent: "", maxCashback: "", monthlyCap: "", fallbackPercent: "" }) {
     tiersContainer.appendChild(makeTierRow(tier));
   }
 
@@ -635,8 +641,18 @@ import {
     rows.forEach((row) => {
       const label = row.querySelector(".tier-label-input").value.trim();
       const percentRaw = row.querySelector(".tier-percent-input").value;
-      if (percentRaw === "") return;
-      tiers.push({ id: makeId(), label, percent: Number(percentRaw) });
+      const maxCashbackRaw = row.querySelector(".tier-maxcashback-input").value;
+      const monthlyCap = row.querySelector(".tier-monthlycap-input").value.trim();
+      const fallbackRaw = row.querySelector(".tier-fallback-input").value;
+      if (percentRaw === "" && !label && !monthlyCap && maxCashbackRaw === "" && fallbackRaw === "") return;
+      tiers.push({
+        id: makeId(),
+        label,
+        percent: percentRaw === "" ? "" : Number(percentRaw),
+        maxCashback: maxCashbackRaw === "" ? "" : Number(maxCashbackRaw),
+        monthlyCap,
+        fallbackPercent: fallbackRaw === "" ? "" : Number(fallbackRaw),
+      });
     });
     return tiers;
   }
@@ -650,9 +666,6 @@ import {
     fields.bank.value = "";
     fields.card.value = "";
     fields.category.value = "";
-    fields.fallbackPercent.value = "";
-    fields.maxCashback.value = "";
-    fields.monthlyCap.value = "";
     fields.note.value = "";
     fields.startDate.value = todayStr();
     fields.endDate.value = "";
@@ -676,16 +689,13 @@ import {
     fields.bank.value = offer.bank || "";
     fields.card.value = offer.card || "";
     fields.category.value = offer.category || "";
-    fields.fallbackPercent.value = offer.fallbackPercent ?? "";
-    fields.maxCashback.value = offer.maxCashback ?? "";
-    fields.monthlyCap.value = offer.monthlyCap || "";
     fields.note.value = offer.note || "";
     fields.startDate.value = offer.startDate || "";
     fields.endDate.value = offer.endDate || "";
     fields.needsRegistration.checked = !!offer.needsRegistration;
     fields.needsSwitch.checked = !!offer.needsSwitch;
     clearTierRows();
-    const tiers = Array.isArray(offer.tiers) && offer.tiers.length ? offer.tiers : [{ label: "", percent: "" }];
+    const tiers = Array.isArray(offer.tiers) && offer.tiers.length ? offer.tiers : [{}];
     tiers.forEach((t) => addTierRow(t));
     dialogTitle.textContent = "編輯優惠";
     offerDialog.showModal();
@@ -723,9 +733,6 @@ import {
       card: fields.card.value.trim(),
       category: fields.category.value.trim(),
       tiers: collectTiers(),
-      fallbackPercent: fields.fallbackPercent.value === "" ? "" : Number(fields.fallbackPercent.value),
-      maxCashback: fields.maxCashback.value === "" ? "" : Number(fields.maxCashback.value),
-      monthlyCap: fields.monthlyCap.value.trim(),
       note: fields.note.value.trim(),
       startDate: fields.startDate.value,
       endDate: fields.endDate.value,
